@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LSTM网络流量预警系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px 30px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .title {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .title h1 {
+            color: white;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        
+        .subtitle {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .status-badge {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.offline {
+            background: #ef4444;
+            animation: none;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        button {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        button.danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        button.stop {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-label {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .stat-value {
+            color: #111827;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        
+        .stat-unit {
+            color: #9ca3af;
+            font-size: 16px;
+            font-weight: 400;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+        
+        .alerts-panel {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .alerts-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        
+        .alerts-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #111827;
+        }
+        
+        .alert-badge {
+            background: #ef4444;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .alert-item {
+            padding: 12px;
+            border-left: 4px solid #ef4444;
+            background: #fef2f2;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .alert-item.warning {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+        
+        .alert-item:hover {
+            transform: translateX(5px);
+        }
+        
+        .alert-level {
+            font-size: 12px;
+            font-weight: 600;
+            color: #ef4444;
+            margin-bottom: 4px;
+        }
+        
+        .alert-level.warning {
+            color: #f59e0b;
+        }
+        
+        .alert-time {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        
+        .alert-details {
+            font-size: 14px;
+            color: #374151;
+        }
+        
+        .residual-chart {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* 加载动画 */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="title">
+                <div style="font-size: 40px;">🔒</div>
+                <div>
+                    <h1>LSTM网络流量预警系统</h1>
+                    <div class="subtitle">基于深度学习的实时流量异常检测 (NF01模型)</div>
+                </div>
+            </div>
+            <div class="controls">
+                <div class="status-badge">
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span id="connectionStatus">离线</span>
+                </div>
+                <select id="intervalSelect" style="padding: 8px; border-radius: 6px; border: none;">
+                    <option value="3">3秒</option>
+                    <option value="5">5秒</option>
+                    <option value="10">10秒</option>
+                </select>
+                <button id="startBtn" onclick="startMonitoring()">
+                    ▶️ 开始监控
+                </button>
+                <button id="pauseBtn" onclick="pauseMonitoring()" disabled>
+                    ⏸️ 暂停
+                </button>
+                <button id="stopBtn" onclick="stopMonitoring()" class="danger" disabled>
+                    ⏹️ 停止
+                </button>
+                <button onclick="exportReport()">
+                    📊 导出报告
+                </button>
+            </div>
+        </div>
+        
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">📊 实际流量均值</div>
+                <div>
+                    <span class="stat-value" id="actualFlow">0</span>
+                    <span class="stat-unit">flows</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">📈 预测流量均值</div>
+                <div>
+                    <span class="stat-value" id="predictedFlow">0</span>
+                    <span class="stat-unit">flows</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🎯 预测准确率</div>
+                <div>
+                    <span class="stat-value" id="accuracy">0</span>
+                    <span class="stat-unit">%</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">⚠️ 异常检测数</div>
+                <div>
+                    <span class="stat-value" id="anomalyCount">0</span>
+                    <span class="stat-unit">次</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">📈 实时流量监控 & LSTM预测</h3>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #3b82f6;"></div>
+                            <span>实际流量</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #10b981;"></div>
+                            <span>LSTM预测</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #fbbf24;"></div>
+                            <span>上界</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #f87171;"></div>
+                            <span>下界</span>
+                        </div>
+                    </div>
+                </div>
+                <canvas id="trafficChart"></canvas>
+            </div>
+            
+            <div class="alerts-panel">
+                <div class="alerts-header">
+                    <h3 class="alerts-title">🚨 异常警报（10）</h3>
+                    <button onclick="clearAlerts()" style="padding: 6px 12px; font-size: 12px;">
+                        清空
+                    </button>
+                </div>
+                <div id="alertsList"></div>
+            </div>
+        </div>
+        
+        <!-- Residual Chart -->
+        <div class="residual-chart">
+            <div class="chart-header">
+                <h3 class="chart-title">📊 预测残差分析</h3>
+            </div>
+            <canvas id="residualChart"></canvas>
+        </div>
+    </div>
+    
+    <script>
+        // 全局变量
+        let socket = null;
+        let isMonitoring = false;
+        let trafficChart = null;
+        let residualChart = null;
+        let dataBuffer = [];
+        let anomalyBuffer = [];
+        let updateInterval = 3000; // 默认3秒
+        
+        // 初始化图表
+        function initCharts() {
+            // 流量监控图表
+            const ctx1 = document.getElementById('trafficChart').getContext('2d');
+            trafficChart = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '实际流量',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'LSTM预测',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: '上界',
+                        data: [],
+                        borderColor: '#fbbf24',
+                        borderDash: [5, 5],
+                        fill: false
+                    }, {
+                        label: '下界',
+                        data: [],
+                        borderColor: '#f87171',
+                        borderDash: [5, 5],
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: { display: true, text: '流量 (flows)' }
+                        }
+                    }
+                }
+            });
+            
+            // 残差图表
+            const ctx2 = document.getElementById('residualChart').getContext('2d');
+            residualChart = new Chart(ctx2, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: '预测残差',
+                        data: [],
+                        backgroundColor: '#8b5cf6',
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            title: { display: true, text: '残差值' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 开始监控
+        function startMonitoring() {
+            if (isMonitoring) return;
+            
+            const interval = document.getElementById('intervalSelect').value;
+            updateInterval = parseInt(interval) * 1000;
+            
+            // 更新UI状态
+            isMonitoring = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('intervalSelect').disabled = true;
+            
+            // 更新连接状态
+            document.getElementById('connectionStatus').textContent = '连接中...';
+            document.getElementById('statusIndicator').classList.remove('offline');
+            
+            // 建立WebSocket连接
+            connectWebSocket();
+        }
+        
+        // 暂停监控
+        function pauseMonitoring() {
+            if (!isMonitoring) return;
+            
+            isMonitoring = false;
+            
+            // 更新UI状态
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('connectionStatus').textContent = '已暂停';
+            
+            // 发送暂停命令到后端
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ action: 'pause' }));
+            }
+        }
+        
+        // 停止监控
+        function stopMonitoring() {
+            isMonitoring = false;
+            
+            // 更新UI状态
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('intervalSelect').disabled = false;
+            document.getElementById('connectionStatus').textContent = '离线';
+            document.getElementById('statusIndicator').classList.add('offline');
+            
+            // 关闭WebSocket连接
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            
+            // 清空数据
+            dataBuffer = [];
+            anomalyBuffer = [];
+        }
+        
+        // 建立WebSocket连接
+        function connectWebSocket() {
+            // 使用与后端相同的端口
+            socket = new WebSocket('ws://localhost:5000/ws');
+            
+            socket.onopen = function() {
+                console.log('WebSocket连接成功');
+                document.getElementById('connectionStatus').textContent = '在线监控中';
+                
+                // 发送开始监控命令
+                socket.send(JSON.stringify({
+                    action: 'start',
+                    interval: updateInterval / 1000
+                }));
+            };
+            
+            socket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateDashboard(data);
+                } catch (error) {
+                    console.error('数据解析错误:', error);
+                }
+            };
+            
+            socket.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+                document.getElementById('connectionStatus').textContent = '连接错误';
+            };
+            
+            socket.onclose = function() {
+                console.log('WebSocket连接关闭');
+                if (isMonitoring) {
+                    // 尝试重新连接
+                    setTimeout(connectWebSocket, 3000);
+                }
+            };
+        }
+        
+        // 更新仪表板
+        function updateDashboard(data) {
+            // 更新统计信息
+            document.getElementById('actualFlow').textContent = Math.round(data.actual || 0);
+            document.getElementById('predictedFlow').textContent = Math.round(data.predicted || 0);
+            document.getElementById('accuracy').textContent = (data.accuracy || 0).toFixed(1);
+            document.getElementById('anomalyCount').textContent = data.anomaly_count || 0;
+            
+            // 更新图表
+            const timestamp = new Date().toLocaleTimeString('zh-CN', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+            
+            // 保持最近30个数据点
+            if (trafficChart.data.labels.length > 30) {
+                trafficChart.data.labels.shift();
+                trafficChart.data.datasets.forEach(dataset => {
+                    dataset.data.shift();
+                });
+            }
+            
+            trafficChart.data.labels.push(timestamp);
+            trafficChart.data.datasets[0].data.push(data.actual);
+            trafficChart.data.datasets[1].data.push(data.predicted);
+            trafficChart.data.datasets[2].data.push(data.upper_bound);
+            trafficChart.data.datasets[3].data.push(data.lower_bound);
+            trafficChart.update('none'); // 无动画更新以提高性能
+            
+            // 更新残差图
+            const residual = data.actual - data.predicted;
+            residualChart.data.datasets[0].data.push({
+                x: residualChart.data.datasets[0].data.length,
+                y: residual
+            });
+            
+            if (residualChart.data.datasets[0].data.length > 50) {
+                residualChart.data.datasets[0].data.shift();
+            }
+            residualChart.update('none');
+            
+            // 如果检测到异常，添加到警报列表
+            if (data.is_anomaly) {
+                addAlert(data);
+            }
+        }
+        
+        // 添加警报
+        function addAlert(data) {
+            const alertsList = document.getElementById('alertsList');
+            const alertItem = document.createElement('div');
+            const isHighRisk = Math.abs(data.actual - data.predicted) > 5000;
+            
+            alertItem.className = isHighRisk ? 'alert-item' : 'alert-item warning';
+            alertItem.innerHTML = `
+                <div class="${isHighRisk ? 'alert-level' : 'alert-level warning'}">
+                    ${isHighRisk ? '⚠️ 高危异常' : '⚠️ 中危异常'}
+                </div>
+                <div class="alert-time">时间: ${new Date().toLocaleString('zh-CN')}</div>
+                <div class="alert-details">
+                    流量: ${Math.round(data.actual)} | 
+                    预测: ${Math.round(data.predicted)} | 
+                    偏差: ${Math.abs(data.actual - data.predicted).toFixed(0)}
+                </div>
+            `;
+            
+            // 插入到列表顶部
+            alertsList.insertBefore(alertItem, alertsList.firstChild);
+            
+            // 保持最多10条警报
+            while (alertsList.children.length > 10) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+            
+            // 更新警报数量
+            const alertCount = alertsList.children.length;
+            document.querySelector('.alerts-title').innerHTML = `🚨 异常警报（${alertCount}）`;
+        }
+        
+        // 清空警报
+        function clearAlerts() {
+            document.getElementById('alertsList').innerHTML = '';
+            document.querySelector('.alerts-title').innerHTML = '🚨 异常警报（0）';
+        }
+        
+        // 导出报告
+        function exportReport() {
+            const report = {
+                timestamp: new Date().toISOString(),
+                statistics: {
+                    actual_flow: document.getElementById('actualFlow').textContent,
+                    predicted_flow: document.getElementById('predictedFlow').textContent,
+                    accuracy: document.getElementById('accuracy').textContent,
+                    anomaly_count: document.getElementById('anomalyCount').textContent
+                },
+                data: dataBuffer,
+                anomalies: anomalyBuffer
+            };
+            
+            const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `traffic_report_${new Date().getTime()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // 页面加载时初始化
+        window.onload = function() {
+            initCharts();
+        };
+        
+        // 页面卸载时清理
+        window.onbeforeunload = function() {
+            if (socket) {
+                socket.close();
+            }
+        };
+    </script>
+</body>
+</html>

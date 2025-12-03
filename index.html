@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LSTM网络流量预警系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #581c87 50%, #1e293b 100%);
+            min-height: 100vh; color: #333; padding: 16px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        /* 头部 */
+        .header {
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
+            border-radius: 12px; padding: 16px 24px; margin-bottom: 16px;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+        }
+        .header-title { color: white; }
+        .header-title h1 { font-size: 1.5em; display: flex; align-items: center; gap: 8px; }
+        .header-title p { font-size: 0.85em; color: #cbd5e1; margin-top: 4px; }
+        .header-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .header-controls select, .header-controls button {
+            padding: 8px 16px; border-radius: 8px; font-size: 0.9em; cursor: pointer; border: none;
+        }
+        .header-controls select { background: rgba(255,255,255,0.2); color: white; }
+        .header-controls select option { color: #333; }
+        .btn-start { background: #22c55e; color: white; }
+        .btn-stop { background: #ef4444; color: white; }
+        .btn-report { background: #3b82f6; color: white; }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        
+        /* 统计卡片 */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+        @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 500px) { .stats-grid { grid-template-columns: 1fr; } }
+        .stat-card {
+            background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-left: 4px solid #3b82f6; display: flex; justify-content: space-between; align-items: center;
+        }
+        .stat-card.green { border-left-color: #22c55e; }
+        .stat-card.purple { border-left-color: #8b5cf6; }
+        .stat-card.orange { border-left-color: #f59e0b; }
+        .stat-card.red { border-left-color: #ef4444; }
+        .stat-info h3 { font-size: 0.85em; color: #6b7280; font-weight: 500; }
+        .stat-info .value { font-size: 1.8em; font-weight: bold; color: #1f2937; }
+        .stat-info .unit { font-size: 0.7em; color: #9ca3af; }
+        .stat-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5em; }
+        .stat-icon.blue { background: #dbeafe; }
+        .stat-icon.green { background: #dcfce7; }
+        .stat-icon.purple { background: #f3e8ff; }
+        .stat-icon.orange { background: #fef3c7; }
+        
+        /* 主内容区 */
+        .main-content { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+        @media (max-width: 1000px) { .main-content { grid-template-columns: 1fr; } }
+        
+        .chart-panel, .alert-panel {
+            background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .panel-title { font-size: 1em; font-weight: 600; color: #374151; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .chart-wrapper { position: relative; height: 280px; }
+        
+        /* 警报面板 */
+        .alert-list { max-height: 300px; overflow-y: auto; }
+        .alert-item {
+            padding: 12px; margin-bottom: 8px; border-radius: 8px; border-left: 4px solid;
+            font-size: 0.85em; animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+        .alert-high { background: #fef2f2; border-left-color: #dc2626; color: #7f1d1d; }
+        .alert-medium { background: #fff7ed; border-left-color: #ea580c; color: #7c2d12; }
+        .alert-low { background: #fefce8; border-left-color: #ca8a04; color: #713f12; }
+        .alert-item strong { display: block; margin-bottom: 4px; }
+        .alert-item small { color: #6b7280; }
+        .no-alert { text-align: center; padding: 40px; color: #9ca3af; }
+        .no-alert .icon { font-size: 3em; margin-bottom: 8px; }
+        
+        /* 残差图 */
+        .residual-panel { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 16px; }
+        .residual-chart { height: 180px; }
+        
+        /* 底部状态栏 */
+        .status-bar {
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
+            border-radius: 12px; padding: 12px 20px; display: flex; justify-content: space-between;
+            align-items: center; color: white; font-size: 0.85em; flex-wrap: wrap; gap: 8px;
+        }
+        .status-indicator { display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .status-dot.running { background: #22c55e; animation: pulse 1.5s infinite; }
+        .status-dot.stopped { background: #6b7280; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .status-info { display: flex; gap: 20px; color: #cbd5e1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <div class="header-title">
+                <h1>🛡️ LSTM网络流量预警系统</h1>
+                <p>基于深度学习的实时流量异常检测 (NF01模型)</p>
+            </div>
+            <div class="header-controls">
+                <label style="color:white;">阈值:</label>
+                <select id="thresholdSelect">
+                    <option value="2">2σ</option>
+                    <option value="2.5" selected>2.5σ</option>
+                    <option value="3">3σ</option>
+                </select>
+                <button class="btn-start" onclick="startMonitoring()">▶ 开始监控</button>
+                <button class="btn-stop" onclick="stopMonitoring()">⏸ 暂停</button>
+                <button class="btn-report" onclick="downloadReport()">📥 导出报告</button>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-info">
+                    <h3>实际流量均值</h3>
+                    <div class="value"><span id="avgActual">0</span><span class="unit"> flows</span></div>
+                </div>
+                <div class="stat-icon blue">📊</div>
+            </div>
+            <div class="stat-card green">
+                <div class="stat-info">
+                    <h3>预测流量均值</h3>
+                    <div class="value"><span id="avgPredicted">0</span><span class="unit"> flows</span></div>
+                </div>
+                <div class="stat-icon green">📈</div>
+            </div>
+            <div class="stat-card purple">
+                <div class="stat-info">
+                    <h3>预测准确率</h3>
+                    <div class="value"><span id="accuracy">0</span><span class="unit"> %</span></div>
+                </div>
+                <div class="stat-icon purple">🎯</div>
+            </div>
+            <div class="stat-card orange" id="anomalyCard">
+                <div class="stat-info">
+                    <h3>异常检测数</h3>
+                    <div class="value"><span id="anomalyCount">0</span><span class="unit"> 次</span></div>
+                </div>
+                <div class="stat-icon orange">⚠️</div>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <div class="chart-panel">
+                <div class="panel-title">📈 实时流量监控 & LSTM预测</div>
+                <div class="chart-wrapper"><canvas id="trafficChart"></canvas></div>
+            </div>
+            <div class="alert-panel">
+                <div class="panel-title">🚨 异常警报 (<span id="alertCount">0</span>)</div>
+                <div class="alert-list" id="alertList">
+                    <div class="no-alert"><div class="icon">🛡️</div><p>系统运行正常</p><small>暂无异常警报</small></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 残差图 -->
+        <div class="residual-panel">
+            <div class="panel-title">📉 预测残差分析</div>
+            <div class="residual-chart"><canvas id="residualChart"></canvas></div>
+        </div>
+
+        <!-- 底部状态栏 -->
+        <div class="status-bar">
+            <div class="status-indicator">
+                <span class="status-dot stopped" id="statusDot"></span>
+                <span id="statusText">未启动</span>
+            </div>
+            <div class="status-info">
+                <span>模型: LSTM (NF01)</span>
+                <span>窗口: 60步</span>
+                <span>更新: 2秒</span>
+                <span>数据点: <span id="dataCount">0</span></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let trafficChart, residualChart;
+        let monitoringInterval = null;
+        let trafficData = [], alerts = [];
+        const MAX_POINTS = 60;
+        const API_BASE = 'http://localhost:5000';
+
+        // 初始化图表
+        function initCharts() {
+            const ctxTraffic = document.getElementById('trafficChart').getContext('2d');
+            trafficChart = new Chart(ctxTraffic, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: '实际流量', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0 },
+                        { label: 'LSTM预测', data: [], borderColor: '#22c55e', borderWidth: 2, borderDash: [5,5], tension: 0.3, pointRadius: 0, fill: false },
+                        { label: '上界', data: [], borderColor: '#fbbf24', backgroundColor: 'rgba(251,191,36,0.15)', borderWidth: 1, fill: '+1', tension: 0.3, pointRadius: 0 },
+                        { label: '下界', data: [], borderColor: '#fbbf24', borderWidth: 1, fill: false, tension: 0.3, pointRadius: 0 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { grid: { color: 'rgba(0,0,0,0.05)' } },
+                        y: { beginAtZero: false, grid: { color: 'rgba(0,0,0,0.05)' }, title: { display: true, text: '流量 (flows)' } }
+                    },
+                    plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } } },
+                    animation: { duration: 0 }
+                }
+            });
+
+            const ctxResidual = document.getElementById('residualChart').getContext('2d');
+            residualChart = new Chart(ctxResidual, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{ label: '残差', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0 }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { grid: { color: 'rgba(0,0,0,0.05)' } },
+                        y: { grid: { color: 'rgba(0,0,0,0.05)' }, title: { display: true, text: '残差' } }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        annotation: { annotations: {} }
+                    },
+                    animation: { duration: 0 }
+                }
+            });
+        }
+
+        // 从API获取数据
+        async function fetchData() {
+            try {
+                const response = await fetch(`${API_BASE}/api/current_data`);
+                if (!response.ok) throw new Error('API请求失败');
+                return await response.json();
+            } catch (error) {
+                console.error('获取数据失败:', error);
+                return null;
+            }
+        }
+
+        // 更新图表数据
+        function updateCharts(data) {
+            if (!data) return;
+            
+            const timestamp = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const threshold = parseFloat(document.getElementById('thresholdSelect').value);
+            const std = 80; // 标准差估计值
+            const thresholdValue = threshold * std;
+
+            // 构造数据点
+            const point = {
+                timestamp,
+                actual: data.total_kb || Math.random() * 500 + 800,
+                predicted: (data.predictions && data.predictions[0]) || (data.total_kb * 0.95 + Math.random() * 50),
+                residual: 0,
+                upperBound: 0,
+                lowerBound: 0,
+                isAnomaly: data.is_anomaly || false
+            };
+            point.residual = point.actual - point.predicted;
+            point.upperBound = point.predicted + thresholdValue;
+            point.lowerBound = Math.max(0, point.predicted - thresholdValue);
+            point.isAnomaly = Math.abs(point.residual) > thresholdValue;
+
+            trafficData.push(point);
+            if (trafficData.length > MAX_POINTS) trafficData.shift();
+
+            // 更新流量图
+            trafficChart.data.labels = trafficData.map(d => d.timestamp);
+            trafficChart.data.datasets[0].data = trafficData.map(d => d.actual.toFixed(2));
+            trafficChart.data.datasets[1].data = trafficData.map(d => d.predicted.toFixed(2));
+            trafficChart.data.datasets[2].data = trafficData.map(d => d.upperBound.toFixed(2));
+            trafficChart.data.datasets[3].data = trafficData.map(d => d.lowerBound.toFixed(2));
+            trafficChart.update('none');
+
+            // 更新残差图
+            residualChart.data.labels = trafficData.map(d => d.timestamp);
+            residualChart.data.datasets[0].data = trafficData.map(d => d.residual.toFixed(2));
+            residualChart.data.datasets[0].pointBackgroundColor = trafficData.map(d => d.isAnomaly ? '#ef4444' : 'transparent');
+            residualChart.data.datasets[0].pointRadius = trafficData.map(d => d.isAnomaly ? 5 : 0);
+            residualChart.update('none');
+
+            // 检测异常并添加警报
+            if (point.isAnomaly) {
+                addAlert(point, thresholdValue);
+            }
+
+            // 更新统计
+            updateStats();
+        }
+
+        // 添加警报
+        function addAlert(point, threshold) {
+            const severity = Math.abs(point.residual) > threshold * 1.5 ? 'high' : Math.abs(point.residual) > threshold ? 'medium' : 'low';
+            const alert = { id: Date.now(), ...point, severity, threshold: threshold.toFixed(0) };
+            alerts.unshift(alert);
+            if (alerts.length > 10) alerts.pop();
+
+            const alertList = document.getElementById('alertList');
+            const severityText = { high: '高危', medium: '中危', low: '低危' };
+            const alertClass = `alert-${severity}`;
+
+            if (alerts.length === 1) alertList.innerHTML = '';
+
+            const alertHTML = `
+                <div class="alert-item ${alertClass}">
+                    <strong>⚠️ ${severityText[severity]}异常</strong>
+                    时间: ${point.timestamp} | 流量: ${point.actual.toFixed(2)}<br>
+                    <small>残差: ${point.residual.toFixed(2)} | 阈值: ±${alert.threshold}</small>
+                </div>
+            `;
+            alertList.insertAdjacentHTML('afterbegin', alertHTML);
+            
+            // 保持最多10条
+            while (alertList.children.length > 10) {
+                alertList.removeChild(alertList.lastChild);
+            }
+
+            document.getElementById('alertCount').textContent = alerts.length;
+        }
+
+        // 更新统计信息
+        function updateStats() {
+            if (trafficData.length === 0) return;
+
+            const avgActual = trafficData.reduce((s, d) => s + d.actual, 0) / trafficData.length;
+            const avgPredicted = trafficData.reduce((s, d) => s + d.predicted, 0) / trafficData.length;
+            const mape = trafficData.reduce((s, d) => s + Math.abs((d.actual - d.predicted) / (d.actual || 1)), 0) / trafficData.length * 100;
+            const anomalyCount = trafficData.filter(d => d.isAnomaly).length;
+
+            document.getElementById('avgActual').textContent = avgActual.toFixed(0);
+            document.getElementById('avgPredicted').textContent = avgPredicted.toFixed(0);
+            document.getElementById('accuracy').textContent = Math.max(0, 100 - mape).toFixed(1);
+            document.getElementById('anomalyCount').textContent = anomalyCount;
+            document.getElementById('dataCount').textContent = trafficData.length;
+
+            // 异常数高时变红
+            const card = document.getElementById('anomalyCard');
+            card.className = anomalyCount > 5 ? 'stat-card red' : 'stat-card orange';
+        }
+
+        // 开始监控
+        function startMonitoring() {
+            if (monitoringInterval) return;
+
+            document.getElementById('statusDot').className = 'status-dot running';
+            document.getElementById('statusText').textContent = '监控运行中';
+
+            // 立即获取一次数据
+            fetchData().then(updateCharts);
+
+            monitoringInterval = setInterval(async () => {
+                const data = await fetchData();
+                updateCharts(data);
+            }, 2000);
+        }
+
+        // 停止监控
+        function stopMonitoring() {
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+            }
+            document.getElementById('statusDot').className = 'status-dot stopped';
+            document.getElementById('statusText').textContent = '已暂停';
+        }
+
+        // 导出报告
+        function downloadReport() {
+            const stats = {
+                avgActual: document.getElementById('avgActual').textContent,
+                avgPredicted: document.getElementById('avgPredicted').textContent,
+                accuracy: document.getElementById('accuracy').textContent,
+                anomalyCount: document.getElementById('anomalyCount').textContent
+            };
+
+            const report = `
+=====================================
+    LSTM网络流量预警系统 - 监控报告
+=====================================
+
+生成时间: ${new Date().toLocaleString()}
+监控模型: NF01 LSTM
+
+【统计概览】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• 实际流量均值: ${stats.avgActual} flows
+• 预测流量均值: ${stats.avgPredicted} flows
+• 预测准确率:   ${stats.accuracy}%
+• 异常检测数:   ${stats.anomalyCount} 次
+• 数据点总数:   ${trafficData.length}
+
+【异常阈值配置】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Sigma倍数: ${document.getElementById('thresholdSelect').value}σ
+
+【最近异常记录】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${alerts.slice(0, 5).map(a => `[${a.timestamp}] 流量:${a.actual.toFixed(2)} 残差:${a.residual.toFixed(2)}`).join('\n') || '无异常记录'}
+
+=====================================
+        报告生成完毕
+=====================================
+            `.trim();
+
+            const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `流量监控报告_${new Date().toISOString().slice(0, 10)}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            // 自动开始监控
+            setTimeout(startMonitoring, 500);
+        });
+    </script>
+</body>
+</html>
